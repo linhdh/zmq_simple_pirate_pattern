@@ -8,26 +8,26 @@ int main ()
 {
     zsock_t *frontend = zsock_new (ZMQ_ROUTER);
     zsock_t *backend = zsock_new (ZMQ_ROUTER);
-    zsock_bind (frontend, "tcp://*:5555");    //  For clients
-    zsock_bind (backend,  "tcp://*:5556");    //  For workers
+    zsock_bind (frontend, "tcp://*:55550");    //  For clients
+    zsock_bind (backend,  "tcp://*:55560");    //  For workers
 
     //  Queue of available workers
     zlist_t *workers = zlist_new ();
 
     //  The body of this example is exactly the same as lbbroker2.
     //  .skip
+    zmq_pollitem_t pollitems [] = {
+        { backend,  0, ZMQ_POLLIN, 0 },
+        { frontend, 0, ZMQ_POLLIN, 0 }
+    };
+
     while (true) {
-        zmq_pollitem_t items [] = {
-            { backend,  0, ZMQ_POLLIN, 0 },
-            { frontend, 0, ZMQ_POLLIN, 0 }
-        };
         //  Poll frontend only if we have available workers
-        int rc = zmq_poll (items, zlist_size (workers)? 2: 1, -1);
-        if (rc == -1)
+        if (const int rc = zmq_poll (pollitems, zlist_size (workers) > 0 ? 2 : 1, -1); rc == -1)
             break;              //  Interrupted
 
         //  Handle worker activity on backend
-        if (items [0].revents & ZMQ_POLLIN) {
+        if (pollitems [0].revents & ZMQ_POLLIN) {
             //  Use worker identity for load-balancing
             zmsg_t *msg = zmsg_recv (backend);
             if (!msg)
@@ -42,7 +42,7 @@ int main ()
             else
                 zmsg_send (&msg, frontend);
         }
-        if (items [1].revents & ZMQ_POLLIN) {
+        if (pollitems [1].revents & ZMQ_POLLIN) {
             //  Get client request, route to first available worker
             zmsg_t *msg = zmsg_recv (frontend);
             if (msg) {

@@ -1,16 +1,16 @@
 #include "czmq.h"
 #define WORKER_READY   "\001"      //  Signals worker is ready
 
-int main (void)
+int main ()
 {
     zsock_t *worker = zsock_new (ZMQ_REQ);
 
     //  Set random identity to make tracing easier
-    srandom ((unsigned) time (NULL));
+    srandom (static_cast<unsigned>(time(nullptr)));
     char identity [10];
     sprintf (identity, "%04X-%04X", randof (0x10000), randof (0x10000));
     zmq_setsockopt (worker, ZMQ_IDENTITY, identity, strlen (identity));
-    zsock_connect (worker, "tcp://localhost:5556");
+    zsock_connect (worker, "tcp://localhost:55560");
 
     //  Tell broker we're ready for work
     printf ("I: (%s) worker ready\n", identity);
