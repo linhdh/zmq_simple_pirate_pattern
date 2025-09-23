@@ -11,10 +11,11 @@ else()
     message(FATAL_ERROR "CZMQ library not found!")
 endif()
 
-add_executable(spqueue spqueue.cpp)
+add_executable(spqueue spqueue.cpp
+        zmsg.h zhelpers.h)
 target_link_libraries(spqueue ${LIB_CZMQ} zmq)
 
-add_executable(spworker spworker.cpp)
+add_executable(spworker spworker.cpp zmsg.h zhelpers.h)
 target_link_libraries(spworker ${LIB_CZMQ} zmq)
 
 add_executable(lpclient lpclient.cpp lpclient.h)

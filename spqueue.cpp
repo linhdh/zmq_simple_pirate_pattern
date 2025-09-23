@@ -1,65 +1,64 @@
 //
 // Created by linhdh on 22/09/2025.
 //
-#include <czmq.h>
-#define WORKER_READY   "\001"      //  Signals worker is ready
+#include "zmsg.h"
+#include <queue>
 
-int main ()
+#define MAX_WORKERS 100
+
+int main (void)
 {
-    zsock_t *frontend = zsock_new (ZMQ_ROUTER);
-    zsock_t *backend = zsock_new (ZMQ_ROUTER);
-    zsock_bind (frontend, "tcp://*:55550");    //  For clients
-    zsock_bind (backend,  "tcp://*:55560");    //  For workers
+    s_version_assert (2, 1);
+
+    //  Prepare our context and sockets
+    zmq::context_t context(1);
+    zmq::socket_t frontend (context, ZMQ_ROUTER);
+    zmq::socket_t backend  (context, ZMQ_ROUTER);
+    frontend.bind("tcp://*:5555");    //  For clients
+    backend.bind("tcp://*:5556");     //  For workers
 
     //  Queue of available workers
-    zlist_t *workers = zlist_new ();
+    std::queue<std::string> worker_queue;
 
-    //  The body of this example is exactly the same as lbbroker2.
-    //  .skip
-    zmq_pollitem_t pollitems [] = {
-        { backend,  0, ZMQ_POLLIN, 0 },
-        { frontend, 0, ZMQ_POLLIN, 0 }
-    };
-
-    while (true) {
+    while (1) {
+        zmq::pollitem_t items [] = {
+            { backend, 0, ZMQ_POLLIN, 0 },
+            { frontend, 0, ZMQ_POLLIN, 0 }
+        };
         //  Poll frontend only if we have available workers
-        if (const int rc = zmq_poll (pollitems, zlist_size (workers) > 0 ? 2 : 1, -1); rc == -1)
-            break;              //  Interrupted
+        if (worker_queue.size())
+            zmq::poll (items, 2, -1);
+        else
+            zmq::poll (items, 1, -1);
 
         //  Handle worker activity on backend
-        if (pollitems [0].revents & ZMQ_POLLIN) {
-            //  Use worker identity for load-balancing
-            zmsg_t *msg = zmsg_recv (backend);
-            if (!msg)
-                break;          //  Interrupted
-            zframe_t *identity = zmsg_unwrap (msg);
-            zlist_append (workers, identity);
+        if (items [0].revents & ZMQ_POLLIN) {
+            zmsg zm(backend);
+            //zmsg_t *zmsg = zmsg_recv (backend);
 
-            //  Forward message to client if it's not a READY
-            zframe_t *frame = zmsg_first (msg);
-            if (memcmp (zframe_data (frame), WORKER_READY, 1) == 0)
-                zmsg_destroy (&msg);
+            //  Use worker address for LRU routing
+            assert (worker_queue.size() < MAX_WORKERS);
+            worker_queue.push(zm.unwrap());
+
+            //  Return reply to client if it's not a READY
+            if (strcmp (zm.address(), "READY") == 0)
+                zm.clear();
             else
-                zmsg_send (&msg, frontend);
+                zm.send (frontend);
         }
-        if (pollitems [1].revents & ZMQ_POLLIN) {
-            //  Get client request, route to first available worker
-            zmsg_t *msg = zmsg_recv (frontend);
-            if (msg) {
-                zmsg_wrap (msg, static_cast<zframe_t *>(zlist_pop(workers)));
-                zmsg_send (&msg, backend);
-            }
+        if (items [1].revents & ZMQ_POLLIN) {
+            //  Now get next client request, route to next worker
+            zmsg zm(frontend);
+            //  REQ socket in worker needs an envelope delimiter
+            zm.wrap(worker_queue.front().c_str(), "");
+            zm.send(backend);
+
+            //  Dequeue and drop the next worker address
+            worker_queue.pop();
         }
     }
-    //  When we're done, clean up properly
-    while (zlist_size (workers)) {
-        auto *frame = static_cast<zframe_t *>(zlist_pop(workers));
-        zframe_destroy (&frame);
-    }
-    zlist_destroy (&workers);
-    zsock_destroy(&frontend);
-    zsock_destroy(&backend);
+    //  We never exit the main loop
     return 0;
-    //  .until
 }
+
 

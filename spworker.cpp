@@ -1,46 +1,39 @@
-#include "czmq.h"
-#define WORKER_READY   "\001"      //  Signals worker is ready
+#include "zmsg.h"
 
-int main ()
+int main (void)
 {
-    zsock_t *worker = zsock_new (ZMQ_REQ);
+    srandom ((unsigned) time (NULL));
+
+    zmq::context_t context(1);
+    zmq::socket_t worker(context, ZMQ_REQ);
 
     //  Set random identity to make tracing easier
-    srandom (static_cast<unsigned>(time(nullptr)));
-    char identity [10];
-    sprintf (identity, "%04X-%04X", randof (0x10000), randof (0x10000));
-    zmq_setsockopt (worker, ZMQ_IDENTITY, identity, strlen (identity));
-    zsock_connect (worker, "tcp://localhost:55560");
+    std::string identity = s_set_id(worker);
+    worker.connect("tcp://localhost:5556");
 
-    //  Tell broker we're ready for work
-    printf ("I: (%s) worker ready\n", identity);
-    zframe_t *frame = zframe_new (WORKER_READY, 1);
-    zframe_send (&frame, worker, 0);
+    //  Tell queue we're ready for work
+    std::cout << "I: (" << identity << ") worker ready" << std::endl;
+    s_send (worker, std::string("READY"));
 
     int cycles = 0;
-    while (true) {
-        zmsg_t *msg = zmsg_recv (worker);
-        if (!msg)
-            break;              //  Interrupted
+    while (1) {
+        zmsg zm (worker);
 
         //  Simulate various problems, after a few cycles
         cycles++;
-        if (cycles > 3 && randof (5) == 0) {
-            printf ("I: (%s) simulating a crash\n", identity);
-            zmsg_destroy (&msg);
+        if (cycles > 3 && within (5) == 0) {
+            std::cout << "I: (" << identity << ") simulating a crash" << std::endl;
+            zm.clear ();
             break;
         }
         else
-            if (cycles > 3 && randof (5) == 0) {
-                printf ("I: (%s) simulating CPU overload\n", identity);
-                sleep (3);
-                if (zctx_interrupted)
-                    break;
+            if (cycles > 3 && within (5) == 0) {
+                std::cout << "I: (" << identity << ") simulating CPU overload" << std::endl;
+                sleep (5);
             }
-        printf ("I: (%s) normal reply\n", identity);
+        std::cout << "I: (" << identity << ") normal reply - " << zm.body () << std::endl;
         sleep (1);              //  Do some heavy work
-        zmsg_send (&msg, worker);
+        zm.send(worker);
     }
-    zsock_destroy (&worker);
     return 0;
 }
